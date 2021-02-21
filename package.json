@@ -1,0 +1,31 @@
+{
+  "name": "orb",
+  "version": "1.0.0",
+  "description": "A framework to design applications as a network",
+  "main": "./src/index.js",
+  "scripts": {
+    "test": "npm run test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NareshPS/orb.git"
+  },
+  "keywords": [
+    "framework",
+    "network",
+    "paradigm",
+    "trips",
+    "messages",
+    "javascript",
+    "node"
+  ],
+  "author": "Naresh P. Singh",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/NareshPS/orb/issues"
+  },
+  "homepage": "https://github.com/NareshPS/orb#readme",
+  "dependencies": {
+    "rxjs": "^6.6.3"
+  }
+}
