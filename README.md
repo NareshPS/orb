@@ -1,2 +1,2 @@
 # orb
-A framework to design applications as a network
+An application is set of data items, and functions that operate over them.
