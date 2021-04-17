@@ -4,7 +4,8 @@
   "description": "A framework to design applications as a network",
   "main": "./src/index.js",
   "scripts": {
-    "test": "npm run test"
+    "watch": "nodemon -w ./src -w ./testsrc ./testsrc/mains/unitmain.js",
+    "test": "node ./testsrc/mains/unitmain.js"
   },
   "repository": {
     "type": "git",
@@ -27,5 +28,17 @@
   "homepage": "https://github.com/NareshPS/orb#readme",
   "dependencies": {
     "rxjs": "^6.6.3"
+  },
+  "devDependencies": {
+    "@pushrocks/gulp-function": "^3.0.4",
+    "browserify": "^17.0.0",
+    "gulp": "^4.0.2",
+    "gulp-buffer": "^0.0.2",
+    "gulp-clean": "^0.4.0",
+    "gulp-run": "^1.7.1",
+    "gulp-sourcemaps": "^3.0.0",
+    "gulp-tap": "^2.0.0",
+    "gulp-terser": "^2.0.1",
+    "gulp-uglify": "^3.0.2"
   }
 }

@@ -1,3 +1,4 @@
+const { buffer, bufferCount } = require('rxjs/internal/operators')
 const {Network, Unit, Partition, Route, Trip} = require('../../src/unit.js')
 
 testNetwork = _ => {
@@ -135,7 +136,7 @@ testPartition = _ => {
 testPipes = _ => {
   const product = new Unit({
     channels: {
-      number: {pipes: [{type: 'buffer', count: 2}]},
+      number: {pipes: [bufferCount(2)]},
       products: {}
     },
     functions: [{
@@ -234,4 +235,4 @@ const testTrip = _ => {
 // testUnit()
 testTwoUnits()
 // testNetwork()
-// testPipes()
+testPipes()
