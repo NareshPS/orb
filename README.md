@@ -2,13 +2,13 @@ Unit
 ====
 We introduce **Unit**, the primary asynchronous computation entity. A unit is a collection of channels. It applies the fun. It has configurable input or output queues. It is possible to have a queueless unit. A unit applies a function over input data elements. The results are queued to the outputs.
 
-<img src="./images/unit-architecture.jpg" alt="Unit Architecture" width="40%" height="40%">
+<img src="./docs/images/unit-architecture.jpg" alt="Unit Architecture" width="40%" height="40%">
 
 Several units are connected to form a **Network**. The connections are established through *next()* operation. *next()* sends a message to input queues. Typically, a network has a START unit and a FINAL unit. The START unit receives the network inputs. The Final unit emits the network output. Network flow is depicted graphically in:
 
-<img src="./images/unit-network-flow-1.jpg" alt="Network Flow" width="40%" height="40%">
-<img src="./images/unit-network-flow-2.jpg" alt="Network Flow" width="40%" height="40%">
-<img src="./images/unit-network-flow-3.jpg" alt="Network Flow" width="40%" height="40%">
+<img src="./docs/images/unit-network-flow-1.jpg" alt="Network Flow" width="40%" height="40%">
+<img src="./docs/images/unit-network-flow-2.jpg" alt="Network Flow" width="40%" height="40%">
+<img src="./docs/images/unit-network-flow-3.jpg" alt="Network Flow" width="40%" height="40%">
 
 ### Unit Structure
 ```js
