@@ -1,5 +1,5 @@
 const logger = require('./logger.js')
-const {Subject, BehaviorSubject, Observable, of, combineLatest} = require('rxjs')
+const {Subject, BehaviorSubject, Observable, of, combineLatest, zip} = require('rxjs')
 const { withLatestFrom, bufferCount, first, buffer, switchMap, mergeAll} = require('rxjs/internal/operators')
 
 class Unit {
@@ -7,18 +7,19 @@ class Unit {
     this.name = o.name
     this.functions = o.functions || []
     this.aggregates = new Aggregates(this)
-    this.resolution = new Resolution(this)
+    this.resolution = resolution(this)
     this.channels = Object.entries(o.channels || {})
     .reduce((chs, [name, config]) => (chs[name] = this._construct.subject({name, config}), chs), {})
   }
 
-  _morph = o => (
-    Object.entries(o.channels).forEach(([name, config]) => this.channels[name] = this._construct.subject({name, config}))
+  _morph = ({channels, context = this.resolution}) => (
+    Object.entries(channels)
+    .forEach(([name, config]) => this.channels[name] = this._construct.morphSubject({source: {unit: this.name, channel: name}, config, context}))
   )
   
   start() {
     this.functions.forEach(
-      ({type, channels, func}) => (
+      ({type = 'first', channels = {}, func = _ => ({})}) => (
         this.aggregates.get(type, channels).subscribe(o => this.publish(func(o)))
       ))
   }
@@ -29,46 +30,33 @@ class Unit {
 
   static filters = {
     channel: {
-      alien: ([name, config]) => config.provider,
+      alien: ([name, config]) => config.provider || config.channel || config.unit,
     }
   }
   
   _construct = {
     subject: ({name, config: c}) => {
-      const subject = (c.provider? 
-      ((c.provider.unit || ErrorPUnit(this.name, name, `unit.Unit._construct`)).get(c.provider.channel) || ErrorPChannel(this.name, name, `unit.Unit._construct`)):
-      (c.default? new BehaviorSubject(c.default): new Subject()))
+      const subject = (c.default? new BehaviorSubject(c.default): new Subject())
 
       return Pipe.apply({subject, pipes: c.pipes, channel: name})
-    }
+    },
+
+    morphSubject: ({source, config: c, context}) => {
+      const pc = context.pconfig(c)
+      const subject = context.pchannel(source, pc)
+
+      return Pipe.apply({subject, pipes: c.pipes, channel: source.channel})
+    },
   }
   
-  subscribe = o => Object.entries(o).forEach(([c, f]) => (this.channels[c] || ErrorChannel(this.name, c)).subscribe(f))
-  get = name => this.channels[name]
+  subscribe = o => Object.entries(o).forEach(([c, f]) => this.get(c).subscribe(f))
+  get = name => this.channels[name] || new InvalidChannel(name, this)
   info = _ => `[channels: [${Object.keys(this.channels)}]]`
   
   publish = o => (
-    Object.entries(o || {}).forEach(([name, data]) => (this.get(name) || ErrorChannel(this.name, name)).next(data))
+    Object.entries(o || {}).forEach(([name, data]) => this.get(name).next(data))
   )
 }
-
-const ErrorPUnit = (u, c, source) => ({
-  get: _ => {throw new Error(`invalid provider unit for unit: ${u} channel: ${c} source: ${source}`)},
-})
-
-const ErrorPChannel = (u, c, source) => new Observable(_ => {throw new Error(`invalid provider channel for unit: ${u} channel: ${c} source: ${source}`)})
-
-const ErrorChannel = (u, c) => ({
-  next: _ => {throw new Error(`invalid unit: ${u} channel: ${c}`)},
-  subscribe: _ => {throw new Error(`invalid unit: ${u} channel: ${c}`)}
-})
-
-const ErrorUnit = (u, source) => ({
-  next: _ => {throw new Error(`invalid unit: ${u} source: ${source}`)},
-  get: _ => {throw new Error(`invalid unit: ${u} source: ${source}`)}
-})
-
-const ErrorPipe = (p, source) => _ => ({next: _ => {throw new Error(`invalid pipe: ${p} source: ${source}`)}})
 
 class Network extends Unit {
   /**
@@ -78,6 +66,12 @@ class Network extends Unit {
    * Once the units are created, they are morhped to the desired form.
    */
   constructor(o) {
+    o = {
+      channels: o.channels || {},
+      functions: o.functions || [],
+      ...o,
+    }
+
     const filters = {
       out: i => !Unit.filters.channel.alien(i),
       in: i => Unit.filters.channel.alien(i)
@@ -95,51 +89,34 @@ class Network extends Unit {
       channels: Object.fromEntries(Object.entries(unit.channels).filter(filters.out)),
       functions: unit.functions
     }))
-    .reduce((us, {name, channels, functions}) => ((us[name] = new Unit({name, functions, channels})), us), {})
-    
-    const morphFunc = ([name, config]) => ([
-      name,
-      (
-        config.provider = {
-          unit: this.resolution.punit(config.provider.channel, config.provider.unit),
-          channel: config.provider.channel
-        },
-        config
-      )
-    ])
+    .reduce((us, {name, channels, functions}) => ((us[name] = new Unit({name, channels, functions})), us), {})
 
     // Morph the network
     this._morph({
-      channels: Object.fromEntries(Object.entries(o.channels).filter(filters.in).map(morphFunc)),
+      channels: Object.fromEntries(Object.entries(o.channels).filter(filters.in)),
     })
 
     // Morph the units
     Object.entries(o.units || {}).forEach(([name, u]) => {
       const mu = this.units[name]
       const mp = {
-        channels: Object.fromEntries(Object.entries(u.channels).filter(filters.in).map(morphFunc)),
+        channels: Object.fromEntries(Object.entries(u.channels).filter(filters.in)),
+        context: this.resolution
       }
 
       logger.info(`units.Network: Morphing unit: ${name} channels: [${Object.entries(u.channels).filter(filters.in)}]`)
       mu._morph(mp)
     })
 
-    // Construct routes
-    this.routes = Object.fromEntries(
-      Object.entries(o.routes || {})
-      .map(([name, route = []]) => [name, route.map(this.resolution.provider)])
-    )
-
     logger.info(`unit.Network: Network configuration: `, Object.entries(this.units).map(([name, u]) => {name, u.info()}))
   }
 
   start() {
-    Object.entries(this.units).map(([name, u]) => (logger.info(`unit.Network.start: ${name}`), u.start()))
+    Object.entries(this.units).map(([name, u]) => {
+      logger.info(`unit.Network.start: ${name}`)
+      u.start()
+    })
     super.start()
-  }
-
-  newTrip(route) {
-    return new Trip(this, route)
   }
 }
 
@@ -151,14 +128,10 @@ class Aggregates {
   get = (type, channels) => {
     logger.info(`unit.Aggregates.get: type: ${type} unit: ${this.unit.name} channels: ${channels}`)
 
-    const obs = channels.map((ch) => this.unit.get(ch) || ErrorPChannel(this.unit.name, ch, `Aggregates.get`))
+    const obs = channels.map((ch) => this.unit.get(ch))
+    const func = this[type] || this.first
 
-    switch(type) {
-      case 'anylatest':
-        return this.anylatest(obs)
-      default:
-        return this.first(obs)
-    }
+    return func(obs)
   }
 
   first = ([start, ...rest]) => {
@@ -174,7 +147,8 @@ class Aggregates {
     : start
   }
 
-  anylatest = ([first, ...rest]) => (console.dir(rest? combineLatest([first, ...rest]): first),(rest? combineLatest([first, ...rest]): first))
+  any = ([first, ...rest]) => (rest? combineLatest([first, ...rest]): first)
+  all = obs => zip(...obs)
 }
 
 class Partition extends Unit {
@@ -217,6 +191,8 @@ class Pipe {
 class Trip {
   constructor(...elements) {
     this.stack = (elements || []).map((e) => this.element.get(e)).reverse()
+    this._nr = new NextRequest(this)
+    this.trace = []
 
     this._toChanged()
   }
@@ -251,7 +227,14 @@ class Trip {
     this._fromChanged(this.request.to)
     this._toChanged()
 
-    const forward = ({unit, channel}) => resolution().unit(unit).next({[channel]: this})
+    const forward = ({unit, channel, unwrap}) => {
+      this.trace.push({unit: unit.name, channel})
+
+      unit.next({[channel]: this._nr.get(to)})
+
+      return unwrap && this.next()
+    }
+
     forward(to)
   }
 
@@ -266,14 +249,48 @@ class Trip {
     .map(({request, ...rest}) => ({request: {...request}, ...rest}))
   )
 
+  empty = _ => this.stack.length === 0
+
   _toChanged = _ => this.request.to = this.element.to().request
   _fromChanged = r => this.request.from = r
+}
+
+const newTrip = elements => new Trip(elements)
+
+class NextRequest {
+  constructor(trip) {
+    this.trip = trip
+  }
+
+  get = (to) => {
+    const {request, unwrap, map, tap} = to
+    const mapFunc = t => (map && (this.trip.request.from = map(request)), t)
+    const unwrapFunc = t => unwrap? typeof unwrap === 'function'? unwrap(request): request: t
+    const tapFunc = t => (tap && tap(request), t)
+
+    return [tapFunc, mapFunc, unwrapFunc].reduce((t, fn) => fn(t), this.trip)
+  }
 }
 
 class NoopUnit extends Unit {
   constructor() {super({})}
   
+  next() { }
+}
+
+class InvalidChannel extends Observable {
+  constructor(name, unit = {}) {
+    super(s => {this.throw()})
+    this.name = name
+    this.unit = unit
+  }
+
   next() {
+    this.throw()
+  }
+
+  throw() {
+    throw new Error(`invalid unit: ${this.unit.name} channel: ${this.name} combination`)
   }
 }
 
@@ -283,10 +300,32 @@ class Resolution {
     this.context = context || {}
   }
 
-  unit = u => u instanceof Unit? u: ErrorUnit(u, 'unit.Resolution.unit')
-  punit = (c, pu) => this._resolvepunit(pu) || ErrorPUnit(c, this.context.name, `unit.Resolution.providerunit`)
-  _resolvepunit = pu => (((this.context.units || {})[pu]) || (pu === this.context.name? this.context: pu instanceof Unit? pu: undefined))
-  provider = ({unit, channel, ...rest}) => ({unit: this.punit(channel, unit), channel, ...rest})
+  _resolvepunit = (source, p) => (
+    ((this.context.units || {})[p.unit]) || (p.unit === this.context.name? this.context: p.unit instanceof Unit? p.unit: ErrorPUnit(p, source))
+  )
+
+  pchannel = (source, pc) => {
+    const pu = this._resolvepunit(source, pc)
+
+    return pu.get(pc.channel) || ErrorPChannel({unit: pu.name, channel: pc.channel}, source)
+  }
+
+  pconfig = c => ({
+    unit: c.unit || (c.provider? c.provider.unit: undefined),
+    channel: c.channel || (c.provider? c.provider.channel: undefined)
+  })
 }
 
-module.exports = {Unit, Network, Partition, Reduction, Trip}
+const ErrorPUnit = (p, container) => ({
+  get: _ => {
+    throw new Error(`invalid unit: ${p.unit} container: {unit: ${container.unit}, channel: ${container.channel}}`)
+  },
+})
+
+const ErrorPChannel = (pc, container) => {
+  throw new Error(`invalid channel: ${pc.channel} container: {unit: ${container.unit}, channel: ${container.channel}}`)
+}
+
+const ErrorPipe = (p, source) => _ => ({next: _ => {throw new Error(`invalid pipe: ${p} source: ${source}`)}})
+
+module.exports = {Unit, Network, Partition, Reduction, Trip, newTrip}
