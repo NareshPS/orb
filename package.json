@@ -4,6 +4,7 @@
   "description": "A framework to design applications as a network",
   "main": "./src/index.js",
   "scripts": {
+    "build": "gulp build",
     "watch": "nodemon -w ./src -w ./testsrc ./testsrc/mains/unitmain.js",
     "test": "node ./testsrc/mains/unitmain.js"
   },
