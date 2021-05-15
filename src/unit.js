@@ -2,10 +2,13 @@ const logger = require('./logger.js')
 const {Subject, BehaviorSubject, Observable, of, combineLatest, zip} = require('rxjs')
 const { withLatestFrom, bufferCount, first, buffer, switchMap, mergeAll} = require('rxjs/internal/operators')
 
+const trace = ({debug}) => args => debug? console.info(...args): undefined
+
 class Unit {
   constructor(o) {
     this.name = o.name
     this.functions = o.functions || []
+    this.trace = trace(o)
     this.aggregates = new Aggregates(this)
     this.resolution = resolution(this)
     this.channels = Object.entries(o.channels || {})
